@@ -2,6 +2,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path'); // ✅ Added to serve React build
 const authRoutes = require('./routes/auth');
 const aiRoutes = require('./routes/ai');
 const dataRoutes = require('./routes/data');
@@ -21,6 +22,15 @@ app.use('/api/payment', paymentRoutes);
 app.get('/', (req, res) => {
   res.send('HeartMind backend is running!');
 });
+
+// ✅ Serve React frontend build
+app.use(express.static(path.join(__dirname, 'client/build')));
+
+ // ✅ Handle all React routes (Express 5 fix using regex)
+app.get(/.*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+});
+
 
 // Use the port provided by Render
 const PORT = process.env.PORT;
