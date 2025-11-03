@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const Stripe = require('stripe');
@@ -8,6 +8,12 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 router.post('/create-session', auth, async (req, res) => {
   try {
+    // ✅ Fetch user to get email
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
@@ -21,7 +27,7 @@ router.post('/create-session', auth, async (req, res) => {
       }],
       success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.CLIENT_URL}/dashboard`,
-      customer_email: req.user.email,
+      customer_email: user.email, // ✅ now valid
     });
     res.json({ url: session.url });
   } catch (err) {
