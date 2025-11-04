@@ -9,7 +9,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 // ✅ Create Stripe Checkout Session
 router.post("/create-session", auth, async (req, res) => {
   try {
-    // 🔧 Use req.user.id (from middleware)
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -32,7 +31,7 @@ router.post("/create-session", auth, async (req, res) => {
       ],
       success_url: `${CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${CLIENT_URL}/dashboard`,
-      customer_email: user.email || "noemail@heartmind.app", // ✅ fallback
+      customer_email: user.email || "noemail@heartmind.app",
     });
 
     res.json({ url: session.url });
@@ -85,5 +84,32 @@ router.post(
     res.json({ received: true });
   }
 );
+
+// ✅ Verify payment after returning from Stripe Checkout
+router.post("/verify", auth, async (req, res) => {
+  const { sessionId } = req.body;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status === "paid") {
+      const user = await User.findById(req.user.id);
+      if (user) {
+        user.subscription = {
+          active: true,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        };
+        await user.save();
+        console.log(`✅ Subscription verified for ${user.name || user._id}`);
+        return res.json({ success: true });
+      }
+    }
+
+    res.json({ success: false });
+  } catch (err) {
+    console.error("❌ Payment verification failed:", err);
+    res.status(500).json({ success: false });
+  }
+});
 
 module.exports = router;
