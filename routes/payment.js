@@ -14,7 +14,7 @@ router.post("/create-session", auth, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // ✅ FIX: Ensure no trailing slash in CLIENT_URL to prevent "//payment-success"
+    // ✅ FIX: Ensure no trailing slash in CLIENT_URL
     const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:3000").replace(/\/$/, "");
 
     const session = await stripe.checkout.sessions.create({
@@ -33,6 +33,9 @@ router.post("/create-session", auth, async (req, res) => {
       success_url: `${CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${CLIENT_URL}/dashboard`,
       customer_email: user.email || "noemail@heartmind.app",
+      metadata: {
+        userId: user._id.toString(), // ✅ Added fix
+      },
     });
 
     res.json({ url: session.url });
@@ -66,16 +69,18 @@ router.post(
       const session = event.data.object;
 
       try {
-        const user = await User.findOne({ email: session.customer_email });
-        if (user) {
-          user.subscription = {
-            active: true,
-            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          };
-          await user.save();
-          console.log(`✅ Subscription activated for ${user.email}`);
+        // ✅ FIX: Use metadata.userId instead of email
+        const userId = session.metadata?.userId;
+        if (userId) {
+          await User.findByIdAndUpdate(userId, {
+            subscription: {
+              active: true,
+              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+            },
+          });
+          console.log(`✅ Subscription activated for user ${userId}`);
         } else {
-          console.log("⚠️ No matching user for paid session:", session.customer_email);
+          console.log("⚠️ No userId metadata found in session.");
         }
       } catch (err) {
         console.error("❌ Error updating subscription:", err.message);
