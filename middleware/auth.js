@@ -1,4 +1,4 @@
- const jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 
 module.exports = function (req, res, next) {
   const auth = req.headers.authorization;
@@ -9,7 +9,7 @@ module.exports = function (req, res, next) {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload; // ✅ attach decoded user (id + email)
+    req.user = payload; // ✅ attach decoded user (id + email if available)
     next();
   } catch (err) {
     console.error('JWT verification failed:', err.message);
