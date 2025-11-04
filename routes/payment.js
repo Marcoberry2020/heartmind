@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const Stripe = require('stripe');
@@ -8,6 +8,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 router.post('/create-session', auth, async (req, res) => {
   try {
+    // ✅ Fetch user to get email
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // ✅ Ensure redirect goes to FRONTEND (React app)
+    const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
@@ -19,9 +28,9 @@ router.post('/create-session', auth, async (req, res) => {
         },
         quantity: 1,
       }],
-      success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/dashboard`,
-      customer_email: req.user.email,
+      success_url: `${CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${CLIENT_URL}/dashboard`,
+      customer_email: user.email, // ✅ now valid
     });
     res.json({ url: session.url });
   } catch (err) {
@@ -46,7 +55,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     const user = await User.findOne({ email: session.customer_email });
     if (user) {
       user.subscription.active = true;
-      user.subscription.expiresAt = new Date(Date.now() + 30*24*60*60*1000); // 30 days
+      user.subscription.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
       await user.save();
     }
   }
