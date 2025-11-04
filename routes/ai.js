@@ -9,27 +9,21 @@ const router = express.Router();
 // ------------------ AI Chat Route ------------------
 router.post('/', auth, async (req, res) => {
   try {
+    // ✅ Use req.userId set by auth middleware
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // ✅ Ensure safe defaults for subscription and freeMessages
-    if (!user.subscription) {
-      user.subscription = { active: false, expiresAt: null };
-    }
-    if (user.freeMessages === undefined || user.freeMessages === null) {
-      user.freeMessages = 10; // Default to 10 free messages
-    }
+    // ✅ Ensure defaults for subscription and freeMessages
+    if (!user.subscription) user.subscription = { active: false, expiresAt: null };
+    if (user.freeMessages === undefined || user.freeMessages === null) user.freeMessages = 10;
 
     const now = new Date();
-    const subExpired =
-      !user.subscription.active ||
-      (user.subscription.expiresAt && user.subscription.expiresAt < now);
+    const subExpired = !user.subscription.active || (user.subscription.expiresAt && user.subscription.expiresAt < now);
 
     // ✅ Check message quota
     if (user.freeMessages <= 0 && subExpired) {
       return res.status(402).json({
-        message:
-          'You have used all free messages. Please subscribe to continue.',
+        message: 'You have used all free messages. Please subscribe to continue.',
       });
     }
 
@@ -39,7 +33,7 @@ router.post('/', auth, async (req, res) => {
       await user.save();
     }
 
-    // ✅ Validate messages
+    // ✅ Validate messages array
     const { messages } = req.body;
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ message: 'Invalid messages format' });
@@ -69,6 +63,7 @@ Keep replies between 3–6 sentences, and never sound robotic.
       temperature: 0.7,
     };
 
+    // ✅ Call Groq AI
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       payload,
@@ -82,7 +77,7 @@ Keep replies between 3–6 sentences, and never sound robotic.
 
     const assistantText = response.data.choices[0].message.content;
 
-    // ✅ Save conversation
+    // ✅ Save conversation in DB
     await Conversation.create({
       userId: req.userId,
       messages: [...messages, { role: 'assistant', text: assistantText }],
