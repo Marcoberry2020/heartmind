@@ -14,7 +14,8 @@ router.post("/create-session", auth, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+    // ✅ FIX: Ensure no trailing slash in CLIENT_URL to prevent "//payment-success"
+    const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:3000").replace(/\/$/, "");
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
