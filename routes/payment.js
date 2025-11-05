@@ -10,11 +10,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 router.post("/create-session", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // ✅ FIX: Ensure no trailing slash in CLIENT_URL
     const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:3000").replace(/\/$/, "");
 
     const session = await stripe.checkout.sessions.create({
@@ -33,9 +30,7 @@ router.post("/create-session", auth, async (req, res) => {
       success_url: `${CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${CLIENT_URL}/dashboard`,
       customer_email: user.email || "noemail@heartmind.app",
-      metadata: {
-        userId: user._id.toString(), // ✅ Added fix
-      },
+      metadata: { userId: user._id.toString() },
     });
 
     res.json({ url: session.url });
@@ -45,7 +40,7 @@ router.post("/create-session", auth, async (req, res) => {
   }
 });
 
-// ✅ Stripe Webhook (handles payment confirmation)
+// ✅ Stripe Webhook (updates subscription immediately)
 router.post(
   "/webhook",
   express.raw({ type: "application/json" }),
@@ -64,26 +59,21 @@ router.post(
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // ✅ Handle successful payment
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
+      const userId = session.metadata?.userId;
 
-      try {
-        // ✅ FIX: Use metadata.userId instead of email
-        const userId = session.metadata?.userId;
-        if (userId) {
+      if (userId) {
+        try {
           await User.findByIdAndUpdate(userId, {
-            subscription: {
-              active: true,
-              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-            },
+            subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
           });
           console.log(`✅ Subscription activated for user ${userId}`);
-        } else {
-          console.log("⚠️ No userId metadata found in session.");
+        } catch (err) {
+          console.error("❌ Error updating subscription:", err.message);
         }
-      } catch (err) {
-        console.error("❌ Error updating subscription:", err.message);
+      } else {
+        console.warn("⚠️ No userId metadata found in Stripe session");
       }
     }
 
@@ -94,23 +84,17 @@ router.post(
 // ✅ Verify payment after returning from Stripe Checkout
 router.post("/verify", auth, async (req, res) => {
   const { sessionId } = req.body;
-
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-
     if (session.payment_status === "paid") {
       const user = await User.findById(req.user.id);
       if (user) {
-        user.subscription = {
-          active: true,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        };
+        user.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
         await user.save();
         console.log(`✅ Subscription verified for ${user.name || user._id}`);
         return res.json({ success: true });
       }
     }
-
     res.json({ success: false });
   } catch (err) {
     console.error("❌ Payment verification failed:", err);
