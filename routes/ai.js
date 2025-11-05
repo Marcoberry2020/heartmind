@@ -9,31 +9,32 @@ const router = express.Router();
 // ------------------ AI Chat Route ------------------
 router.post('/', auth, async (req, res) => {
   try {
-    // ✅ Use req.userId set by auth middleware
+    // ✅ Get user from DB
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // ✅ Ensure defaults for subscription and freeMessages
-    if (!user.subscription) user.subscription = { active: false, expiresAt: null };
+    // ✅ Ensure freeMessages has a default
     if (user.freeMessages === undefined || user.freeMessages === null) user.freeMessages = 10;
 
     const now = new Date();
-    const subExpired = !user.subscription.active || (user.subscription.expiresAt && user.subscription.expiresAt < now);
 
-    // ✅ Check message quota
-    if (user.freeMessages <= 0 && subExpired) {
+    // ✅ Check if subscription is active
+    const isSubscribed = user.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > now;
+
+    // ✅ Check if user can chat
+    if (user.freeMessages <= 0 && !isSubscribed) {
       return res.status(402).json({
         message: 'You have used all free messages. Please subscribe to continue.',
       });
     }
 
     // ✅ Deduct free message if not subscribed
-    if (!user.subscription.active && user.freeMessages > 0) {
+    if (!isSubscribed && user.freeMessages > 0) {
       user.freeMessages -= 1;
       await user.save();
     }
 
-    // ✅ Validate messages array
+    // ✅ Validate messages
     const { messages } = req.body;
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ message: 'Invalid messages format' });
@@ -77,7 +78,7 @@ Keep replies between 3–6 sentences, and never sound robotic.
 
     const assistantText = response.data.choices[0].message.content;
 
-    // ✅ Save conversation in DB
+    // ✅ Save conversation
     await Conversation.create({
       userId: req.userId,
       messages: [...messages, { role: 'assistant', text: assistantText }],
