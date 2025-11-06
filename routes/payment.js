@@ -15,10 +15,11 @@ router.post('/create-inline', auth, async (req, res) => {
     const amount = 750 * 100; // ₦750 in kobo
 
     // Ensure valid email for Paystack
-    const email = user.email?.trim() || `user${user._id.toString()}@heartmind.ai`;
-    if (!email.includes('@')) {
-      return res.status(400).json({ error: 'Invalid email for Paystack payment' });
-    }
+    const email = (user.email && user.email.includes('@')) 
+      ? user.email.trim() 
+      : `user_${user._id.toString().slice(-6)}@heartmind.ai`;
+
+    console.log('Payment email being used:', email);
 
     // Initialize Paystack transaction
     const response = await axios.post(
