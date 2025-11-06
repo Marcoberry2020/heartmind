@@ -1,105 +1,89 @@
  const express = require("express");
 const auth = require("../middleware/auth");
 const User = require("../models/User");
-const Stripe = require("stripe");
 const router = express.Router();
+const axios = require("axios");
+const crypto = require("crypto");
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-// ✅ Create Stripe Checkout Session
+// 1️⃣ Create Paystack session
 router.post("/create-session", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:3000").replace(/\/$/, "");
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: "HeartMind Subscription" },
-            unit_amount: 999, // $9.99
-          },
-          quantity: 1,
+    const response = await axios.post(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        email: user.email || "noemail@heartmind.app",
+        amount: 75000, // ₦750 in kobo
+        currency: "NGN",
+        metadata: { userId: user._id.toString() },
+        callback_url: `${process.env.CLIENT_URL}/payment-success`,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          "Content-Type": "application/json",
         },
-      ],
-      success_url: `${CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${CLIENT_URL}/dashboard`,
-      customer_email: user.email || "noemail@heartmind.app",
-      metadata: { userId: user._id.toString() },
-    });
+      }
+    );
 
-    res.json({ url: session.url });
+    return res.json({ url: response.data.data.authorization_url });
   } catch (err) {
-    console.error("❌ Stripe session creation failed:", err);
-    res.status(500).json({ message: "Payment session creation failed" });
+    console.error("❌ Paystack Checkout Error:", err.response?.data || err);
+    res.status(500).json({ message: "Could not create checkout" });
   }
 });
 
-// ✅ Stripe Webhook (updates subscription immediately)
+// 2️⃣ Webhook to verify payment
 router.post(
   "/webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
-    const sig = req.headers["stripe-signature"];
-    let event;
-
     try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      console.error("❌ Webhook signature verification failed:", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+      const signature = req.headers["x-paystack-signature"];
+      const hash = crypto
+        .createHmac("sha512", PAYSTACK_SECRET)
+        .update(req.body)
+        .digest("hex");
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const userId = session.metadata?.userId;
-
-      if (userId) {
-        try {
-          await User.findByIdAndUpdate(userId, {
-            subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          });
-          console.log(`✅ Subscription activated for user ${userId}`);
-        } catch (err) {
-          console.error("❌ Error updating subscription:", err.message);
-        }
-      } else {
-        console.warn("⚠️ No userId metadata found in Stripe session");
+      if (hash !== signature) {
+        console.log("❌ Invalid webhook signature");
+        return res.status(400).send("Invalid signature");
       }
-    }
 
-    res.json({ received: true });
+      const event = JSON.parse(req.body);
+
+      if (event.event === "charge.success") {
+        const data = event.data;
+        const userId = data.metadata?.userId;
+
+        if (userId) {
+          // Give user 30 days subscription
+          await User.findByIdAndUpdate(userId, {
+            subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          });
+          console.log(`✅ Subscription activated for ${userId}`);
+        }
+      }
+
+      return res.json({ received: true });
+    } catch (err) {
+      console.error("❌ Webhook Error:", err.message);
+      return res.status(400).send("Webhook Error");
+    }
   }
 );
 
-// ✅ Verify payment after returning from Stripe Checkout
+// 3️⃣ Verify subscription
 router.post("/verify", auth, async (req, res) => {
-  const { sessionId } = req.body;
-  try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.payment_status === "paid") {
-      const user = await User.findById(req.user.id);
-      if (user) {
-        user.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
-        await user.save();
-        console.log(`✅ Subscription verified for ${user.name || user._id}`);
-        return res.json({ success: true });
-      }
-    }
-    res.json({ success: false });
-  } catch (err) {
-    console.error("❌ Payment verification failed:", err);
-    res.status(500).json({ success: false });
+  const user = await User.findById(req.user.id);
+  if (user?.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > new Date()) {
+    return res.json({ success: true });
   }
+  return res.json({ success: false });
 });
 
 module.exports = router;
