@@ -67,7 +67,8 @@ router.post(
         return res.status(400).send("Invalid signature");
       }
 
-      const event = JSON.parse(req.body);
+      // 🔹 Convert buffer to string before parsing
+      const event = JSON.parse(req.body.toString());
 
       if (event.event === "charge.success") {
         const data = event.data;
@@ -77,13 +78,14 @@ router.post(
           // Activate 1 month subscription and reset free messages
           await User.findByIdAndUpdate(userId, {
             subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            freeMessages: 10, // Optional: reset free messages if you want
+            freeMessages: 10,
           });
           console.log(`✅ Subscription activated for user ${userId}`);
         }
       }
 
-      return res.json({ received: true });
+      // 🔹 Respond immediately to Paystack
+      return res.status(200).send("Received");
     } catch (err) {
       console.error("❌ Webhook Error:", err.message);
       return res.status(400).send("Webhook Error");
