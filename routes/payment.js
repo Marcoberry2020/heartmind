@@ -13,8 +13,13 @@ router.post("/create-session", auth, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Use a unique fallback email if user.email is missing
-    const email = user.email?.trim() || `user-${user._id}@heartmind.app`;
+    // Ensure a valid email
+    let email = (user.email || "").trim();
+    if (!email || !email.includes("@")) {
+      email = `user${user._id.toString()}@heartmind.app`;
+    }
+
+    console.log("Creating Paystack session for email:", email);
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
@@ -32,6 +37,11 @@ router.post("/create-session", auth, async (req, res) => {
         },
       }
     );
+
+    if (!response.data?.data?.authorization_url) {
+      console.error("❌ Paystack did not return an authorization URL:", response.data);
+      return res.status(500).json({ message: "Could not create checkout" });
+    }
 
     return res.json({ url: response.data.data.authorization_url });
   } catch (err) {
@@ -64,11 +74,10 @@ router.post(
         const userId = data.metadata?.userId;
 
         if (userId) {
-          // Give user 30 days subscription
           await User.findByIdAndUpdate(userId, {
             subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           });
-          console.log(`✅ Subscription activated for ${userId}`);
+          console.log(`✅ Subscription activated for user ${userId}`);
         }
       }
 
@@ -82,11 +91,17 @@ router.post(
 
 // 3️⃣ Verify subscription
 router.post("/verify", auth, async (req, res) => {
-  const user = await User.findById(req.user.id);
-  if (user?.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > new Date()) {
-    return res.json({ success: true });
+  try {
+    const user = await User.findById(req.user.id);
+    const now = new Date();
+    if (user?.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > now) {
+      return res.json({ success: true });
+    }
+    return res.json({ success: false });
+  } catch (err) {
+    console.error("❌ Subscription verify error:", err.message);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
-  return res.json({ success: false });
 });
 
 module.exports = router;
