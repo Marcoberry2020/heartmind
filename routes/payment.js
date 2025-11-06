@@ -13,10 +13,13 @@ router.post("/create-session", auth, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    // Use a unique fallback email if user.email is missing
+    const email = user.email?.trim() || `user-${user._id}@heartmind.app`;
+
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
-        email: user.email || "noemail@heartmind.app",
+        email,
         amount: 75000, // ₦750 in kobo
         currency: "NGN",
         metadata: { userId: user._id.toString() },
