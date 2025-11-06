@@ -6,7 +6,7 @@ const auth = require('../middleware/auth');
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-// 1️⃣ Create Paystack inline session
+// ✅ Create Paystack inline session
 router.post('/create-inline', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -14,10 +14,17 @@ router.post('/create-inline', auth, async (req, res) => {
 
     const amount = 750 * 100; // ₦750 in kobo
 
+    // Ensure valid email for Paystack
+    const email = user.email?.trim() || `user${user._id.toString()}@heartmind.ai`;
+    if (!email.includes('@')) {
+      return res.status(400).json({ error: 'Invalid email for Paystack payment' });
+    }
+
+    // Initialize Paystack transaction
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
-        email: user.email || `user${user._id}@heartmind.ai`,
+        email,
         amount,
       },
       {
@@ -29,12 +36,15 @@ router.post('/create-inline', auth, async (req, res) => {
     );
 
     const { reference } = response.data.data;
+
+    // Save reference in user document
     user.paystackReference = reference;
     await user.save();
 
+    // Send data needed for Paystack inline popup
     res.json({
       key: process.env.PAYSTACK_PUBLIC_KEY,
-      email: user.email || `user${user._id}@heartmind.ai`,
+      email,
       amount,
       reference,
     });
@@ -44,18 +54,21 @@ router.post('/create-inline', auth, async (req, res) => {
   }
 });
 
-// 2️⃣ Verify payment and activate 1-month subscription
+// ✅ Verify payment
 router.get('/verify/:reference', auth, async (req, res) => {
   try {
     const { reference } = req.params;
     const user = await User.findById(req.user.id);
 
-    if (!user || user.paystackReference !== reference)
+    if (!user || user.paystackReference !== reference) {
       return res.status(400).json({ error: 'Invalid reference' });
+    }
 
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
+      {
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+      }
     );
 
     const { status } = response.data.data;
@@ -63,12 +76,13 @@ router.get('/verify/:reference', auth, async (req, res) => {
     if (status === 'success') {
       const now = new Date();
       if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
-        // Extend current subscription by 1 month
+        // Extend existing subscription
         user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
       } else {
-        // New subscription
+        // Start new subscription
         user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
       }
+
       user.paystackReference = null;
       await user.save();
 
