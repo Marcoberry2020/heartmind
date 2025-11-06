@@ -13,16 +13,13 @@ router.post("/create-session", auth, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Ensure a valid email
+    // Ensure valid email fallback
     let email = (user.email || "").trim();
     if (!email || !email.includes("@")) {
       email = `user${user._id.toString()}@heartmind.app`;
     }
 
-    // Remove trailing slash from CLIENT_URL to avoid double slashes
     const callbackUrl = `${process.env.CLIENT_URL.replace(/\/$/, "")}/payment-success`;
-    console.log("Creating Paystack session for email:", email);
-    console.log("Callback URL:", callbackUrl);
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
@@ -53,7 +50,7 @@ router.post("/create-session", auth, async (req, res) => {
   }
 });
 
-// 2️⃣ Webhook to verify payment
+// 2️⃣ Webhook to verify payment and activate subscription
 router.post(
   "/webhook",
   express.raw({ type: "application/json" }),
@@ -77,8 +74,10 @@ router.post(
         const userId = data.metadata?.userId;
 
         if (userId) {
+          // Activate 1 month subscription and reset free messages
           await User.findByIdAndUpdate(userId, {
             subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            freeMessages: 10, // Optional: reset free messages if you want
           });
           console.log(`✅ Subscription activated for user ${userId}`);
         }
@@ -97,9 +96,13 @@ router.post("/verify", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     const now = new Date();
+
+    // Check if subscription active
     if (user?.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > now) {
       return res.json({ success: true });
     }
+
+    // Subscription expired
     return res.json({ success: false });
   } catch (err) {
     console.error("❌ Subscription verify error:", err.message);
