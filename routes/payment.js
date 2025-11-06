@@ -14,9 +14,9 @@ router.post('/create-inline', auth, async (req, res) => {
 
     const amount = 750 * 100; // ₦750 in kobo
 
-    // Ensure valid email for Paystack
-    const email = (user.email && user.email.includes('@')) 
-      ? user.email.trim() 
+    // Fallback email if missing
+    const email = user.email && user.email.includes('@')
+      ? user.email.trim()
       : `user_${user._id.toString().slice(-6)}@heartmind.ai`;
 
     console.log('Payment email being used:', email);
@@ -24,10 +24,7 @@ router.post('/create-inline', auth, async (req, res) => {
     // Initialize Paystack transaction
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
-      {
-        email,
-        amount,
-      },
+      { email, amount },
       {
         headers: {
           Authorization: `Bearer ${PAYSTACK_SECRET}`,
@@ -38,11 +35,10 @@ router.post('/create-inline', auth, async (req, res) => {
 
     const { reference } = response.data.data;
 
-    // Save reference in user document
+    // Save reference in user doc
     user.paystackReference = reference;
     await user.save();
 
-    // Send data needed for Paystack inline popup
     res.json({
       key: process.env.PAYSTACK_PUBLIC_KEY,
       email,
@@ -67,9 +63,7 @@ router.get('/verify/:reference', auth, async (req, res) => {
 
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
-      }
+      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
     );
 
     const { status } = response.data.data;
@@ -77,10 +71,8 @@ router.get('/verify/:reference', auth, async (req, res) => {
     if (status === 'success') {
       const now = new Date();
       if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
-        // Extend existing subscription
         user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
       } else {
-        // Start new subscription
         user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
       }
 
