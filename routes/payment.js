@@ -1,114 +1,84 @@
- const express = require("express");
-const auth = require("../middleware/auth");
-const User = require("../models/User");
+ const express = require('express');
 const router = express.Router();
-const axios = require("axios");
-const crypto = require("crypto");
+const axios = require('axios');
+const User = require('../models/User');
+const auth = require('../middleware/auth');
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-// 1️⃣ Create Paystack session
-router.post("/create-session", auth, async (req, res) => {
+// 1️⃣ Create Paystack inline session
+router.post('/create-inline', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Ensure valid email fallback
-    let email = (user.email || "").trim();
-    if (!email || !email.includes("@")) {
-      email = `user${user._id.toString()}@heartmind.app`;
-    }
-
-    const callbackUrl = `${process.env.CLIENT_URL.replace(/\/$/, "")}/payment-success`;
+    const amount = 750 * 100; // ₦750 in kobo
 
     const response = await axios.post(
-      "https://api.paystack.co/transaction/initialize",
+      'https://api.paystack.co/transaction/initialize',
       {
-        email,
-        amount: 75000, // ₦750 in kobo
-        currency: "NGN",
-        metadata: { userId: user._id.toString() },
-        callback_url: callbackUrl,
+        email: user.email || `user${user._id}@heartmind.ai`,
+        amount,
       },
       {
         headers: {
           Authorization: `Bearer ${PAYSTACK_SECRET}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
       }
     );
 
-    if (!response.data?.data?.authorization_url) {
-      console.error("❌ Paystack did not return an authorization URL:", response.data);
-      return res.status(500).json({ message: "Could not create checkout" });
-    }
+    const { reference } = response.data.data;
+    user.paystackReference = reference;
+    await user.save();
 
-    return res.json({ url: response.data.data.authorization_url });
+    res.json({
+      key: process.env.PAYSTACK_PUBLIC_KEY,
+      email: user.email || `user${user._id}@heartmind.ai`,
+      amount,
+      reference,
+    });
   } catch (err) {
-    console.error("❌ Paystack Checkout Error:", err.response?.data || err);
-    res.status(500).json({ message: "Could not create checkout" });
+    console.error('Error creating payment:', err.response?.data || err);
+    res.status(500).json({ error: 'Could not initiate payment' });
   }
 });
 
-// 2️⃣ Webhook to verify payment and activate subscription
-router.post(
-  "/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    try {
-      const signature = req.headers["x-paystack-signature"];
-      const hash = crypto
-        .createHmac("sha512", PAYSTACK_SECRET)
-        .update(req.body)
-        .digest("hex");
-
-      if (hash !== signature) {
-        console.log("❌ Invalid webhook signature");
-        return res.status(400).send("Invalid signature");
-      }
-
-      // 🔹 Convert buffer to string before parsing
-      const event = JSON.parse(req.body.toString());
-
-      if (event.event === "charge.success") {
-        const data = event.data;
-        const userId = data.metadata?.userId;
-
-        if (userId) {
-          // Activate 1 month subscription and reset free messages
-          await User.findByIdAndUpdate(userId, {
-            subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            freeMessages: 10,
-          });
-          console.log(`✅ Subscription activated for user ${userId}`);
-        }
-      }
-
-      // 🔹 Respond immediately to Paystack
-      return res.status(200).send("Received");
-    } catch (err) {
-      console.error("❌ Webhook Error:", err.message);
-      return res.status(400).send("Webhook Error");
-    }
-  }
-);
-
-// 3️⃣ Verify subscription
-router.post("/verify", auth, async (req, res) => {
+// 2️⃣ Verify payment and activate 1-month subscription
+router.get('/verify/:reference', auth, async (req, res) => {
   try {
+    const { reference } = req.params;
     const user = await User.findById(req.user.id);
-    const now = new Date();
 
-    // Check if subscription active
-    if (user?.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > now) {
-      return res.json({ success: true });
+    if (!user || user.paystackReference !== reference)
+      return res.status(400).json({ error: 'Invalid reference' });
+
+    const response = await axios.get(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
+    );
+
+    const { status } = response.data.data;
+
+    if (status === 'success') {
+      const now = new Date();
+      if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
+        // Extend current subscription by 1 month
+        user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
+      } else {
+        // New subscription
+        user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
+      }
+      user.paystackReference = null;
+      await user.save();
+
+      return res.json({ success: true, message: 'Subscription activated!' });
     }
 
-    // Subscription expired
-    return res.json({ success: false });
+    res.status(400).json({ error: 'Payment verification failed' });
   } catch (err) {
-    console.error("❌ Subscription verify error:", err.message);
-    return res.status(500).json({ success: false, message: "Server error" });
+    console.error('Payment verification error:', err.response?.data || err);
+    res.status(500).json({ error: 'Verification failed' });
   }
 });
 
