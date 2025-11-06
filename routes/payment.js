@@ -19,7 +19,10 @@ router.post("/create-session", auth, async (req, res) => {
       email = `user${user._id.toString()}@heartmind.app`;
     }
 
+    // Remove trailing slash from CLIENT_URL to avoid double slashes
+    const callbackUrl = `${process.env.CLIENT_URL.replace(/\/$/, "")}/payment-success`;
     console.log("Creating Paystack session for email:", email);
+    console.log("Callback URL:", callbackUrl);
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
@@ -28,7 +31,7 @@ router.post("/create-session", auth, async (req, res) => {
         amount: 75000, // ₦750 in kobo
         currency: "NGN",
         metadata: { userId: user._id.toString() },
-        callback_url: `${process.env.CLIENT_URL}/payment-success`,
+        callback_url: callbackUrl,
       },
       {
         headers: {
