@@ -5,7 +5,6 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-
 axios.defaults.family = 4;
 
 // ✅ CREATE PAYSTACK SESSION
@@ -20,13 +19,11 @@ router.post('/create-session', auth, async (req, res) => {
 
     const amount = 750 * 100;
 
-    // ✅ Initialize Paystack
     const init = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
         email,
         amount,
-        // ✅ Put the reference back inside the callback URL
         callback_url: "https://heartmindai.netlify.app/payment-success"
       },
       {
@@ -42,12 +39,11 @@ router.post('/create-session', auth, async (req, res) => {
 
     console.log("INIT REFERENCE (saved):", reference);
 
-    // ✅ Save reference to user
+    // Save reference temporarily
     user.paystackReference = reference;
     await user.save();
 
     res.json({ url: authorization_url });
-
   } catch (err) {
     console.error("PAYSTACK REDIRECT ERROR:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to initiate payment session" });
@@ -55,15 +51,12 @@ router.post('/create-session', auth, async (req, res) => {
 });
 
 // ✅ VERIFY PAYSTACK PAYMENT
-router.get('/verify/:reference', async (req, res) => {
+router.get('/verify/:reference', auth, async (req, res) => {
   try {
     const { reference } = req.params;
-
     console.log("VERIFY REFERENCE (incoming):", reference);
 
-    const user = await User.findOne({ paystackReference: reference });
-    if (!user) return res.status(404).json({ error: "Invalid reference" });
-
+    // Call Paystack API directly to verify the reference
     const confirm = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
@@ -72,15 +65,16 @@ router.get('/verify/:reference', async (req, res) => {
       }
     );
 
-    const { status } = confirm.data.data;
+    const { status, customer } = confirm.data.data;
 
     if (status === 'success') {
-      const now = new Date();
+      // Find user by auth (auth middleware must provide req.userId)
+      const user = await User.findById(req.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
 
+      const now = new Date();
       if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
-        user.subscriptionExpiresAt.setMonth(
-          user.subscriptionExpiresAt.getMonth() + 1
-        );
+        user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
       } else {
         user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
       }
@@ -92,7 +86,6 @@ router.get('/verify/:reference', async (req, res) => {
     }
 
     return res.status(400).json({ error: "Payment verification failed" });
-
   } catch (err) {
     console.error("Payment verification error:", err.response?.data || err.message);
     res.status(500).json({ error: "Verification failed" });
