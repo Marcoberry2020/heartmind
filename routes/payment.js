@@ -2,15 +2,15 @@
 const router = express.Router();
 const axios = require('axios');
 const User = require('../models/User');
-const auth = require('../middleware/auth');
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 axios.defaults.family = 4;
 
-// ✅ CREATE PAYSTACK SESSION
-router.post('/create-session', auth, async (req, res) => {
+// ✅ Create Paystack session (unchanged)
+router.post('/create-session', async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
+    const { userId } = req.body; // pass userId from frontend
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const email = (user.email && user.email.includes('@'))
@@ -39,7 +39,6 @@ router.post('/create-session', auth, async (req, res) => {
 
     console.log("INIT REFERENCE (saved):", reference);
 
-    // Save reference temporarily
     user.paystackReference = reference;
     await user.save();
 
@@ -50,13 +49,13 @@ router.post('/create-session', auth, async (req, res) => {
   }
 });
 
-// ✅ VERIFY PAYSTACK PAYMENT
-router.get('/verify/:reference', auth, async (req, res) => {
+// ✅ Verify Paystack payment (public route)
+router.get('/verify/:reference', async (req, res) => {
   try {
     const { reference } = req.params;
     console.log("VERIFY REFERENCE (incoming):", reference);
 
-    // Call Paystack API directly to verify the reference
+    // Verify with Paystack
     const confirm = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
@@ -67,25 +66,26 @@ router.get('/verify/:reference', auth, async (req, res) => {
 
     const { status, customer } = confirm.data.data;
 
-    if (status === 'success') {
-      // Find user by auth (auth middleware must provide req.userId)
-      const user = await User.findById(req.userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const now = new Date();
-      if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
-        user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
-      } else {
-        user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
-      }
-
-      user.paystackReference = null;
-      await user.save();
-
-      return res.json({ success: true, message: "Subscription activated!" });
+    if (status !== 'success') {
+      return res.status(400).json({ error: "Payment verification failed" });
     }
 
-    return res.status(400).json({ error: "Payment verification failed" });
+    // Update user subscription based on email or userId stored when initiating payment
+    const user = await User.findOne({ paystackReference: reference });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const now = new Date();
+    if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
+      user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
+    } else {
+      user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
+    }
+
+    user.paystackReference = null;
+    await user.save();
+
+    return res.json({ success: true, message: "Subscription activated!" });
+
   } catch (err) {
     console.error("Payment verification error:", err.response?.data || err.message);
     res.status(500).json({ error: "Verification failed" });
