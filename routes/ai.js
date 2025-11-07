@@ -6,65 +6,104 @@ const User = require('../models/User');
 
 const router = express.Router();
 
-// ------------------ AI Chat Route ------------------
+// ------------------ AI Chat Route With Memory ------------------
 router.post('/', auth, async (req, res) => {
   try {
-    // ✅ Get user from DB
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // ✅ Ensure freeMessages has a default
-    if (user.freeMessages === undefined || user.freeMessages === null) user.freeMessages = 10;
+    // ✅ Default free messages
+    if (user.freeMessages == null) user.freeMessages = 10;
 
     const now = new Date();
+    const isSubscribed =
+      user.subscriptionExpiresAt &&
+      new Date(user.subscriptionExpiresAt) > now;
 
-    // ✅ Check if subscription is active
-    const isSubscribed = user.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) > now;
-
-    // ✅ Check if user can chat
+    // ✅ Enforce free messages / subscription
     if (user.freeMessages <= 0 && !isSubscribed) {
       return res.status(402).json({
-        message: 'You have used all free messages. Please subscribe to continue.',
+        message:
+          'You have used all free messages. Please subscribe to continue.',
       });
     }
 
-    // ✅ Deduct free message if not subscribed
+    // ✅ Deduct message if not subscribed
     if (!isSubscribed && user.freeMessages > 0) {
       user.freeMessages -= 1;
       await user.save();
     }
 
-    // ✅ Validate messages
+    // ✅ Validate frontend messages
     const { messages } = req.body;
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ message: 'Invalid messages format' });
     }
 
-    const mapped = messages.map((m) => ({
-      role: m.role === 'assistant' ? 'assistant' : 'user',
+    // ---------- 1️⃣ SAVE USER INPUT TO MEMORY ----------
+    user.chatHistory.push({
+      role: 'user',
+      text: messages[messages.length - 1].text,
+    });
+
+    // ✅ Keep only last 20 messages
+    if (user.chatHistory.length > 20) {
+      user.chatHistory = user.chatHistory.slice(-20);
+    }
+
+    await user.save();
+
+    // ---------- 2️⃣ BUILD MEMORY FOR AI ----------
+    const shortTerm = user.chatHistory.map((m) => ({
+      role: m.role,
       content: m.text,
     }));
+
+    const longTermMemory = `
+User Name: ${user.name || "Unknown"}
+
+Long-term Emotional Memory:
+- Moods: ${user.emotionalProfile?.moods?.join(', ') || "None"}
+- Triggers: ${user.emotionalProfile?.triggers?.join(', ') || "None"}
+- Goals: ${user.emotionalProfile?.goals?.join(', ') || "None"}
+- Preferences: ${user.emotionalProfile?.preferences?.join(', ') || "None"}
+
+Use this memory to stay emotionally consistent and human.
+`;
 
     const systemPrompt = {
       role: 'system',
       content: `
-You are HeartMind, a gentle, emotionally intelligent companion that helps people heal from heartbreak.
-Your voice is warm, poetic, and deeply empathetic. You validate pain without judgment, help users process grief, guide them to rebuild self-worth, and slowly bring hope back.
-You remember what the user shares, use their name when possible, and respond like a calm human friend, not a chatbot.
-When users are in distress, you stay grounded and soothing. 
-Offer reflection questions, emotional regulation exercises, journaling prompts, gentle affirmations, and reminders that healing is possible.
-Keep replies between 3–6 sentences, and never sound robotic.
+You are HeartMind, an empathetic emotional healing companion.
+
+ALWAYS use this memory:
+${longTermMemory}
+
+Rules:
+ - Sound human, warm, emotional, and deeply caring.
+- Validate feelings before offering advice.
+- Use the user's name naturally in conversation.
+- Remember and reference past emotions, struggles, and patterns.
+- Keep replies between 3–6 sentences.
+- Never sound robotic, formal, or scripted.
+- Speak like a gentle mix of a supportive therapist and a loving partner.
+- Be sweet, comforting, and reassuring, especially during heartbreak or loneliness.
+- Give real-world advice on healing, emotional growth, relationships, and rebuilding self-worth.
+- Use grounding exercises, reflection questions, and small healing steps when needed.
+- Never judge the user. Never minimize their feelings.
+- No lists unless important. No more than one short list per response.
+- Never mention that you are an AI or model.
 `,
     };
 
+    // ---------- 3️⃣ SEND TO GROQ ----------
     const payload = {
       model: 'llama-3.3-70b-versatile',
-      messages: [systemPrompt, ...mapped],
+      messages: [systemPrompt, ...shortTerm],
       max_tokens: 500,
       temperature: 0.7,
     };
 
-    // ✅ Call Groq AI
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       payload,
@@ -78,13 +117,75 @@ Keep replies between 3–6 sentences, and never sound robotic.
 
     const assistantText = response.data.choices[0].message.content;
 
-    // ✅ Save conversation
-    await Conversation.create({
-      userId: req.userId,
-      messages: [...messages, { role: 'assistant', text: assistantText }],
+    // ---------- 4️⃣ SAVE ASSISTANT RESPONSE TO MEMORY ----------
+    user.chatHistory.push({
+      role: 'assistant',
+      text: assistantText,
     });
 
+    if (user.chatHistory.length > 20) {
+      user.chatHistory = user.chatHistory.slice(-20);
+    }
+
+    await user.save();
+
+    // ---------- 5️⃣ EXTRACT NEW MEMORY ----------
+    const memoryExtractionPayload = {
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: `
+Analyze the user's last message and extract emotional memory.
+Return ONLY JSON.
+
+Format:
+{
+ "moods": [],
+ "triggers": [],
+ "goals": [],
+ "preferences": []
+}
+`
+        },
+        {
+          role: "user",
+          content: messages[messages.length - 1].text
+        }
+      ]
+    };
+
+    try {
+      const memRes = await axios.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        memoryExtractionPayload,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      const extracted = JSON.parse(memRes.data.choices[0].message.content);
+
+      // ✅ Save long-term emotional memory
+      user.emotionalProfile = {
+        moods: [...new Set([...(user.emotionalProfile.moods || []), ...extracted.moods])],
+        triggers: [...new Set([...(user.emotionalProfile.triggers || []), ...extracted.triggers])],
+        goals: [...new Set([...(user.emotionalProfile.goals || []), ...extracted.goals])],
+        preferences: [...new Set([...(user.emotionalProfile.preferences || []), ...extracted.preferences])],
+      };
+
+      await user.save();
+
+    } catch (err) {
+      console.error("Memory extraction failed:", err.message);
+    }
+
+    // ✅ Return assistant message
     res.json({ reply: assistantText });
+
   } catch (err) {
     console.error('AI error', err.response?.data || err.message);
     res.status(500).json({
