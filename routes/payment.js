@@ -31,7 +31,7 @@ router.post('/create-session', auth, async (req, res) => {
       {
         email,
         amount,
-        callback_url: "https://heartmind.netlify.app/payment-success"  // ✅ Correct callback
+        callback_url: "https://heartmindai.netlify.app/payment-success"  // ✅ Correct callback
       },
       {
         headers: {
