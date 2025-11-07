@@ -5,16 +5,13 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-const PAYSTACK_PUBLIC = process.env.PAYSTACK_PUBLIC_KEY;
 
-// ✅ Fix Render IPv6 issue
+// Force axios to use IPv4
 axios.defaults.family = 4;
 
 // ✅ CREATE PAYSTACK SESSION (Redirect Mode)
 router.post('/create-session', auth, async (req, res) => {
   try {
-    console.log("PAYSTACK SECRET LOADED:", !!PAYSTACK_SECRET);
-
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -22,16 +19,14 @@ router.post('/create-session', auth, async (req, res) => {
       ? user.email.trim()
       : `test+${user._id.toString().slice(-6)}@example.com`;
 
-    console.log("Initializing Paystack for email:", email);
-
-    const amount = 750 * 100; // ₦750 in kobo
+    const amount = 750 * 100;
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
         email,
         amount,
-        callback_url: "https://heartmindai.netlify.app/payment-success" // ✅ Correct callback
+        callback_url: "https://heartmindai.netlify.app/payment-success"
       },
       {
         headers: {
@@ -44,31 +39,32 @@ router.post('/create-session', auth, async (req, res) => {
 
     const { authorization_url, reference } = response.data.data;
 
-    // ✅ Save reference for verification
     user.paystackReference = reference;
     await user.save();
 
-    res.json({ url: authorization_url });
+    return res.json({ url: authorization_url });
 
   } catch (err) {
     console.error("PAYSTACK REDIRECT ERROR:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to initiate payment session" });
+    return res.status(500).json({ error: "Failed to initiate payment session" });
   }
 });
 
-// ✅ VERIFY PAYSTACK PAYMENT (NO AUTH REQUIRED)
+// ✅ VERIFY PAYSTACK PAYMENT (Robust)
 router.get('/verify/:reference', async (req, res) => {
   try {
     const { reference } = req.params;
 
-    // ✅ Find user using the stored Paystack reference
+    // Find user by reference
     const user = await User.findOne({ paystackReference: reference });
 
     if (!user) {
-      return res.status(400).json({ error: "Invalid reference" });
+      return res.status(404).json({ 
+        error: "Reference not found or already used. Payment may already be verified." 
+      });
     }
 
-    // ✅ Verify payment with Paystack
+    // Verify payment with Paystack
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
@@ -79,32 +75,28 @@ router.get('/verify/:reference', async (req, res) => {
 
     const { status } = response.data.data;
 
-    if (status === 'success') {
-      const now = new Date();
-
-      // ✅ Extend or start subscription
-      if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
-        user.subscriptionExpiresAt.setMonth(
-          user.subscriptionExpiresAt.getMonth() + 1
-        );
-      } else {
-        user.subscriptionExpiresAt = new Date(
-          now.setMonth(now.getMonth() + 1)
-        );
-      }
-
-      // ✅ Clear paystack reference
-      user.paystackReference = null;
-      await user.save();
-
-      return res.json({ success: true, message: "Subscription activated!" });
+    if (status !== 'success') {
+      return res.status(400).json({ error: "Payment not successful yet." });
     }
 
-    return res.status(400).json({ error: "Payment verification failed" });
+    const now = new Date();
+
+    // Extend subscription
+    if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
+      user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
+    } else {
+      user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
+    }
+
+    // Clear reference to prevent duplicate verification
+    user.paystackReference = null;
+    await user.save();
+
+    return res.json({ success: true, message: "Subscription activated!" });
 
   } catch (err) {
     console.error("Payment verification error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Verification failed" });
+    return res.status(500).json({ error: "Verification failed" });
   }
 });
 
