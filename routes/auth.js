@@ -62,27 +62,44 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+ 
+// ✅ Decrement free messages
+router.post("/decrement-free", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (user.freeMessages > 0) {
+      user.freeMessages -= 1;
+      await user.save();
+    }
+
+    res.json({ success: true, freeMessages: user.freeMessages });
+
+  } catch (err) {
+    console.error("Decrement error:", err.message);
+    res.status(500).json({ error: "Could not update free messages" });
+  }
+});
+
 
 // ---------- GET LOGGED-IN USER (FIXED SUBSCRIPTION CHECK) ----------
+ // ✅ GET LOGGED-IN USER (return correct subscription field)
 router.get('/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId).select('-passwordHash');
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const now = new Date();
-    const subscriptionActive = user.subscription?.active && user.subscription.expiresAt > now;
-
     res.json({
       ...user.toObject(),
-      subscription: {
-        active: subscriptionActive,
-        expiresAt: user.subscription?.expiresAt,
-      },
+      subscriptionExpiresAt: user.subscriptionExpiresAt || null
     });
+
   } catch (err) {
     console.error('Fetch user error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 module.exports = router;
