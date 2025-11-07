@@ -7,15 +7,22 @@ const auth = require('../middleware/auth');
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC = process.env.PAYSTACK_PUBLIC_KEY;
 
+// ✅ Force axios to use IPv4 (Render sometimes fails with IPv6)
+axios.defaults.family = 4;
+
 // ✅ NEW PAYSTACK REDIRECT SESSION (Frontend uses this)
 router.post('/create-session', auth, async (req, res) => {
   try {
+    console.log("PAYSTACK SECRET LOADED:", !!PAYSTACK_SECRET);
+
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const email = (user.email && user.email.includes('@'))
       ? user.email.trim()
       : `test+${user._id.toString().slice(-6)}@example.com`;
+
+    console.log("Initializing Paystack for email:", email);
 
     const amount = 750 * 100;
 
@@ -32,16 +39,16 @@ router.post('/create-session', auth, async (req, res) => {
           Authorization: `Bearer ${PAYSTACK_SECRET}`,
           'Content-Type': 'application/json',
         },
+        timeout: 15000 // ✅ prevents Paystack request timeout
       }
     );
 
     const { authorization_url, reference } = response.data.data;
 
-    // ✅ Save reference so verify route works
+    // ✅ Save reference for verify
     user.paystackReference = reference;
     await user.save();
 
-    // ✅ Return the redirect URL
     return res.json({ url: authorization_url });
 
   } catch (err) {
@@ -61,7 +68,10 @@ router.get('/verify/:reference', auth, async (req, res) => {
 
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
+      { 
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+        timeout: 15000
+      }
     );
 
     const { status } = response.data.data;
