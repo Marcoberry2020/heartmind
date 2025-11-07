@@ -15,19 +15,19 @@ router.post('/create-session', auth, async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Generate a test email if user email is not valid
+    // Generate a test email if user email is invalid
     const email = (user.email && user.email.includes('@'))
       ? user.email.trim()
       : `test+${user._id.toString().slice(-6)}@example.com`;
 
     const amount = 750 * 100; // ₦750 in kobo
 
+    // Initialize Paystack transaction
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
         email,
-        amount,
-        callback_url: "https://heartmindai.netlify.app/payment-success"
+        amount
       },
       {
         headers: {
@@ -44,7 +44,10 @@ router.post('/create-session', auth, async (req, res) => {
     user.paystackReference = reference;
     await user.save();
 
-    res.json({ url: authorization_url });
+    // ✅ Fix: append reference to callback_url for frontend
+    const urlWithReference = `${authorization_url}&callback_url=https://heartmindai.netlify.app/payment-success?reference=${reference}`;
+
+    res.json({ url: urlWithReference });
 
   } catch (err) {
     console.error("PAYSTACK REDIRECT ERROR:", err.response?.data || err.message);
@@ -77,11 +80,13 @@ router.get('/verify/:reference', async (req, res) => {
 
       // Extend or start subscription
       if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
-        user.subscriptionExpiresAt.setMonth(
-          user.subscriptionExpiresAt.getMonth() + 1
-        );
+        const current = new Date(user.subscriptionExpiresAt);
+        current.setMonth(current.getMonth() + 1);
+        user.subscriptionExpiresAt = current;
       } else {
-        user.subscriptionExpiresAt = new Date(now.setMonth(now.getMonth() + 1));
+        const nextMonth = new Date();
+        nextMonth.setMonth(nextMonth.getMonth() + 1);
+        user.subscriptionExpiresAt = nextMonth;
       }
 
       // Clear reference
