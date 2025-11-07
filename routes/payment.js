@@ -56,6 +56,25 @@ router.post('/create-session', auth, async (req, res) => {
     return res.status(500).json({ error: 'Failed to initiate payment session' });
   }
 });
+// ✅ Decrement free messages
+router.post("/decrement-free", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (user.freeMessages > 0) {
+      user.freeMessages -= 1;
+      await user.save();
+    }
+
+    res.json({ success: true, freeMessages: user.freeMessages });
+
+  } catch (err) {
+    console.error("Decrement error:", err.message);
+    res.status(500).json({ error: "Could not update free messages" });
+  }
+});
+
 
 // ✅ Verify Paystack payment
 router.get('/verify/:reference', auth, async (req, res) => {
