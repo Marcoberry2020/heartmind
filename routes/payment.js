@@ -7,10 +7,10 @@ const auth = require('../middleware/auth');
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC = process.env.PAYSTACK_PUBLIC_KEY;
 
-// ✅ Force axios to use IPv4 (Render sometimes fails with IPv6)
+// ✅ Fix Render IPv6 issue
 axios.defaults.family = 4;
 
-// ✅ NEW PAYSTACK REDIRECT SESSION (Frontend uses this)
+// ✅ CREATE PAYSTACK SESSION (Redirect Mode)
 router.post('/create-session', auth, async (req, res) => {
   try {
     console.log("PAYSTACK SECRET LOADED:", !!PAYSTACK_SECRET);
@@ -24,70 +24,55 @@ router.post('/create-session', auth, async (req, res) => {
 
     console.log("Initializing Paystack for email:", email);
 
-    const amount = 750 * 100;
+    const amount = 750 * 100; // ₦750 in kobo
 
-    // ✅ Initialize transaction
     const response = await axios.post(
-      'https://api.paystack.co/transaction/initialize',
+      "https://api.paystack.co/transaction/initialize",
       {
         email,
         amount,
-        callback_url: 'https://heartmind.ai/payment-success'
+        callback_url: "https://heartmind.netlify.app/payment-success"  // ✅ Correct callback
       },
       {
         headers: {
           Authorization: `Bearer ${PAYSTACK_SECRET}`,
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
-        timeout: 15000 // ✅ prevents Paystack request timeout
+        timeout: 15000
       }
     );
 
     const { authorization_url, reference } = response.data.data;
 
-    // ✅ Save reference for verify
+    // ✅ Save reference for verification
     user.paystackReference = reference;
     await user.save();
 
-    return res.json({ url: authorization_url });
+    res.json({ url: authorization_url });
 
   } catch (err) {
-    console.error('PAYSTACK REDIRECT ERROR:', err.response?.data || err.message);
-    return res.status(500).json({ error: 'Failed to initiate payment session' });
-  }
-});
-// ✅ Decrement free messages
-router.post("/decrement-free", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    if (user.freeMessages > 0) {
-      user.freeMessages -= 1;
-      await user.save();
-    }
-
-    res.json({ success: true, freeMessages: user.freeMessages });
-
-  } catch (err) {
-    console.error("Decrement error:", err.message);
-    res.status(500).json({ error: "Could not update free messages" });
+    console.error("PAYSTACK REDIRECT ERROR:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to initiate payment session" });
   }
 });
 
 
-// ✅ Verify Paystack payment
-router.get('/verify/:reference', auth, async (req, res) => {
+// ✅ VERIFY PAYSTACK PAYMENT (NO AUTH REQUIRED)
+router.get('/verify/:reference', async (req, res) => {
   try {
     const { reference } = req.params;
-    const user = await User.findById(req.userId);
 
-    if (!user || user.paystackReference !== reference)
-      return res.status(400).json({ error: 'Invalid reference' });
+    // ✅ Find user using the stored Paystack reference
+    const user = await User.findOne({ paystackReference: reference });
 
+    if (!user) {
+      return res.status(400).json({ error: "Invalid reference" });
+    }
+
+    // ✅ Verify payment with Paystack
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
-      { 
+      {
         headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
         timeout: 15000
       }
@@ -109,18 +94,20 @@ router.get('/verify/:reference', auth, async (req, res) => {
         );
       }
 
+      // ✅ Clear paystack reference
       user.paystackReference = null;
       await user.save();
 
-      return res.json({ success: true, message: 'Subscription activated!' });
+      return res.json({ success: true, message: "Subscription activated!" });
     }
 
-    return res.status(400).json({ error: 'Payment verification failed' });
+    return res.status(400).json({ error: "Payment verification failed" });
 
   } catch (err) {
-    console.error('Payment verification error:', err.response?.data || err.message);
-    return res.status(500).json({ error: 'Verification failed' });
+    console.error("Payment verification error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Verification failed" });
   }
 });
+
 
 module.exports = router;
