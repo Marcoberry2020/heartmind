@@ -31,7 +31,7 @@ router.post('/create-session', auth, async (req, res) => {
       {
         email,
         amount,
-        callback_url: "https://heartmindai.netlify.app/payment-success"  // ✅ Correct callback
+        callback_url: "https://heartmindai.netlify.app/payment-success" // ✅ Correct callback
       },
       {
         headers: {
@@ -55,7 +55,6 @@ router.post('/create-session', auth, async (req, res) => {
     res.status(500).json({ error: "Failed to initiate payment session" });
   }
 });
-
 
 // ✅ VERIFY PAYSTACK PAYMENT (NO AUTH REQUIRED)
 router.get('/verify/:reference', async (req, res) => {
@@ -108,6 +107,5 @@ router.get('/verify/:reference', async (req, res) => {
     res.status(500).json({ error: "Verification failed" });
   }
 });
-
 
 module.exports = router;
