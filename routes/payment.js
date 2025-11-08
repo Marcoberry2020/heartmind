@@ -5,94 +5,130 @@ const router = express.Router();
 
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
-// ✅ VERIFY PAYMENT
+// ✅ 1. CREATE PAYSTACK SESSION (Start Payment)
+router.post("/create-session", async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required." });
+    }
+
+    // Load user
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Use stored email OR fallback
+    const email = user.email
+      ? user.email
+      : `user${userId.slice(-6)}@example.com`;
+
+    // Amount (₦750)
+    const amount = 750 * 100;
+
+    console.log("✅ Creating Paystack session for:", email);
+
+    // Initialize Paystack
+    const init = await axios.post(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        email,
+        amount,
+        callback_url: "https://heartmindai.netlify.app/payment-success"
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    console.log("✅ Paystack session created:", init.data.data.reference);
+
+    // Return checkout URL
+    return res.json({
+      url: init.data.data.authorization_url
+    });
+
+  } catch (error) {
+    console.error("❌ Paystack session error:", error.response?.data || error.message);
+    return res.status(500).json({ error: "Failed to create payment session." });
+  }
+});
+
+// ✅ 2. VERIFY PAYMENT AFTER PAYSTACK REDIRECT
 router.post("/verify-payment", async (req, res) => {
   const { reference, userId } = req.body;
 
-  if (!userId || !reference) {
+  if (!reference || !userId) {
     return res.status(400).json({
       success: false,
-      message: "User ID and payment reference are required.",
+      message: "Reference and userId are required."
     });
   }
 
   try {
     console.log("🔍 Verifying payment:", reference);
 
-    // ✅ Paystack verification
-    const response = await axios.get(
+    // Verify with Paystack
+    const verify = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
         headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-        },
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`
+        }
       }
     );
 
-    const paystackData = response.data?.data;
-    console.log("✅ Paystack verification:", paystackData);
+    const data = verify.data?.data;
 
-    if (!paystackData || paystackData.status !== "success") {
+    if (!data || data.status !== "success") {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed or not successful.",
+        message: "Payment verification failed or incomplete."
       });
     }
 
-    // ✅ Find the user
+    console.log("✅ Paystack verified:", data.amount);
+
+    // Find user
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "User not found"
       });
     }
 
-    console.log("🔍 User before update:", {
-      subscriptionExpiresAt: user.subscriptionExpiresAt,
-      freeMessages: user.freeMessages,
-    });
-
-    // ✅ Calculate new expiry
     const now = new Date();
     const currentExpiry =
       user.subscriptionExpiresAt && user.subscriptionExpiresAt > now
         ? new Date(user.subscriptionExpiresAt)
         : now;
 
+    // ✅ Add 30 days subscription
     const newExpiry = new Date(
-      currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000 // +30 days
+      currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000
     );
 
     user.subscriptionExpiresAt = newExpiry;
-
-    console.log("🔧 User before save:", {
-      subscriptionExpiresAt: user.subscriptionExpiresAt,
-    });
-
     await user.save();
 
-    const updatedUser = await User.findById(userId);
-
-    console.log("✅ User after save:", {
-      subscriptionExpiresAt: updatedUser.subscriptionExpiresAt,
-    });
+    console.log("✅ Subscription updated:", newExpiry);
 
     return res.json({
       success: true,
-      message: "Payment successful, subscription activated",
-      user: updatedUser.toObject(),
+      message: "Payment verified, subscription activated.",
+      user: user
     });
-  } catch (error) {
-    console.error(
-      "❌ Error verifying payment:",
-      error.response?.data || error.message
-    );
 
+  } catch (error) {
+    console.error("❌ Payment verification error:", error.response?.data || error.message);
     return res.status(500).json({
       success: false,
-      message: "Error verifying payment",
-      error: error.message,
+      message: "Verification failed.",
+      error: error.message
     });
   }
 });
