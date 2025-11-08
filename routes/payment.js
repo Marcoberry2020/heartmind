@@ -28,19 +28,22 @@ router.post("/create-session", async (req, res) => {
 
     console.log("✅ Creating Paystack session for:", email);
 
+    // Dynamic callback URL with userId for verification
+    const callbackUrl = `https://heartmindai.netlify.app/payment-success?userId=${userId}`;
+
     // Initialize Paystack
     const init = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
         email,
         amount,
-        callback_url: "https://heartmindai.netlify.app/payment-success"
+        callback_url: callbackUrl,
       },
       {
         headers: {
           Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json"
-        }
+          "Content-Type": "application/json",
+        },
       }
     );
 
@@ -48,7 +51,7 @@ router.post("/create-session", async (req, res) => {
 
     // Return checkout URL
     return res.json({
-      url: init.data.data.authorization_url
+      url: init.data.data.authorization_url,
     });
 
   } catch (error) {
@@ -64,7 +67,7 @@ router.post("/verify-payment", async (req, res) => {
   if (!reference || !userId) {
     return res.status(400).json({
       success: false,
-      message: "Reference and userId are required."
+      message: "Reference and userId are required.",
     });
   }
 
@@ -76,8 +79,8 @@ router.post("/verify-payment", async (req, res) => {
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
         headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`
-        }
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+        },
       }
     );
 
@@ -86,7 +89,7 @@ router.post("/verify-payment", async (req, res) => {
     if (!data || data.status !== "success") {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed or incomplete."
+        message: "Payment verification failed or incomplete.",
       });
     }
 
@@ -97,7 +100,7 @@ router.post("/verify-payment", async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: "User not found",
       });
     }
 
@@ -120,7 +123,7 @@ router.post("/verify-payment", async (req, res) => {
     return res.json({
       success: true,
       message: "Payment verified, subscription activated.",
-      user: user
+      user: user,
     });
 
   } catch (error) {
@@ -128,7 +131,7 @@ router.post("/verify-payment", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Verification failed.",
-      error: error.message
+      error: error.message,
     });
   }
 });
