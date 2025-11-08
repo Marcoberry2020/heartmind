@@ -7,12 +7,13 @@ const auth = require('../middleware/auth');
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 axios.defaults.family = 4;
 
-// ✅ CREATE PAYSTACK SESSION (auth required)
+// ✅ CREATE PAYSTACK SESSION
 router.post('/create-session', auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    // Use email for Paystack
     const email = (user.email && user.email.includes('@'))
       ? user.email.trim()
       : `test+${user._id.toString().slice(-6)}@example.com`;
@@ -37,8 +38,7 @@ router.post('/create-session', auth, async (req, res) => {
 
     const { authorization_url, reference } = init.data.data;
 
-    console.log("INIT REFERENCE (saved):", reference);
-
+    // Save reference to user
     user.paystackReference = reference;
     await user.save();
 
@@ -50,27 +50,31 @@ router.post('/create-session', auth, async (req, res) => {
   }
 });
 
-// ✅ VERIFY PAYSTACK PAYMENT (public)
+// ✅ VERIFY PAYSTACK PAYMENT
 router.get('/verify/:reference', async (req, res) => {
   try {
     const { reference } = req.params;
     console.log("VERIFY REFERENCE (incoming):", reference);
 
-    // Verify payment with Paystack
+    // Step 1: Verify payment with Paystack
     const confirm = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` }, timeout: 15000 }
+      {
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+        timeout: 15000
+      }
     );
 
-    const { status } = confirm.data.data;
+    const { status, customer } = confirm.data.data;
     if (status !== 'success') {
       return res.status(400).json({ error: "Payment verification failed" });
     }
 
-    // Update user subscription
-    const user = await User.findOne({ paystackReference: reference });
+    // Step 2: Find user by Paystack customer email
+    const user = await User.findOne({ email: customer.email });
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    // Step 3: Update subscription
     const now = new Date();
     if (user.subscriptionExpiresAt && user.subscriptionExpiresAt > now) {
       user.subscriptionExpiresAt.setMonth(user.subscriptionExpiresAt.getMonth() + 1);
