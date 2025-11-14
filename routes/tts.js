@@ -3,7 +3,7 @@ const axios = require('axios');
 const auth = require('../middleware/auth'); // optional if you want to protect TTS
 const router = express.Router();
 
-router.post('/', auth, async (req, res) => {
+router.post('/',  async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: "Text is required" });
