@@ -60,7 +60,7 @@ router.post("/create-session", async (req, res) => {
   }
 });
 
-// ✅ 2. VERIFY PAYMENT AFTER PAYSTACK REDIRECT
+// 2. VERIFY PAYMENT AFTER PAYSTACK REDIRECT
 router.post("/verify-payment", async (req, res) => {
   const { reference, userId } = req.body;
 
@@ -93,7 +93,7 @@ router.post("/verify-payment", async (req, res) => {
       });
     }
 
-    console.log("✅ Paystack verified:", data.amount);
+    console.log(" Paystack verified:", data.amount);
 
     // Find user
     const user = await User.findById(userId);
@@ -110,7 +110,7 @@ router.post("/verify-payment", async (req, res) => {
         ? new Date(user.subscriptionExpiresAt)
         : now;
 
-    // ✅ Add 30 days subscription
+    // Add 30 days subscription
     const newExpiry = new Date(
       currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000
     );
@@ -118,7 +118,7 @@ router.post("/verify-payment", async (req, res) => {
     user.subscriptionExpiresAt = newExpiry;
     await user.save();
 
-    console.log("✅ Subscription updated:", newExpiry);
+    console.log(" Subscription updated:", newExpiry);
 
     return res.json({
       success: true,

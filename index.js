@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const aiRoutes = require('./routes/ai');
 const dataRoutes = require('./routes/data');
 const paymentRoutes = require('./routes/payment');
+const ttsRoutes = require('./routes/tts');
 
 const app = express();
 
@@ -21,17 +22,18 @@ app.use('/api/auth', authRoutes);
 app.use('/api/ai-chat', aiRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/tts', ttsRoutes);
 
-// ✅ Optional Paystack webhook (raw body)
+// Optional Paystack webhook (raw body)
 app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   console.log('Webhook received!');
   res.sendStatus(200);
 });
 
-// ✅ Root route
+// Root route
 app.get('/', (req, res) => res.send('HeartMind backend is running!'));
 
-// ✅ Serve React build (after API routes)
+//  Serve React build (after API routes)
 app.use(express.static(path.join(__dirname, 'client/build')));
 app.get(/.*/, (req, res) =>
   res.sendFile(path.join(__dirname, 'client/build', 'index.html'))
