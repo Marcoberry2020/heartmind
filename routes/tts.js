@@ -1,68 +1,33 @@
  const express = require('express');
-const axios = require('axios');
+const { ElevenLabsClient } = require('@elevenlabs/elevenlabs-js');
 const router = express.Router();
+
+const elevenlabs = new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY,
+});
 
 router.post('/', async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text || !text.trim()) 
-      return res.status(400).json({ error: "Text is required" });
+    if (!text || !text.trim()) return res.status(400).json({ error: "Text is required" });
 
-    const VOICE_ID = "Xb7hH8MSUJpSbSDYk0k2"; // Free human voice
-    const API_KEY = (process.env.ELEVENLABS_API_KEY || "").trim();
-
-    if (!API_KEY) {
-      return res.status(500).json({ error: "Missing ElevenLabs API key" });
-    }
-
-    const ttsResponse = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+    const audio = await elevenlabs.textToSpeech.convert(
+      'JBFqnCBsd6RMkjVDRZzb', // Free human voice ID
       {
         text,
-        voice_settings: {
-          stability: 0.7,
-          similarity_boost: 0.85
-        }
-      },
-      {
-        headers: {
-          "xi-api-key": API_KEY,
-          "Content-Type": "application/json",
-          "Accept": "audio/mpeg"
-        },
-        responseType: "arraybuffer"
+        modelId: 'eleven_multilingual_v2',
+        outputFormat: 'mp3_44100_128',
       }
     );
 
-    const contentType = ttsResponse.headers["content-type"];
+    // Convert ArrayBuffer to Base64
+    const audioBase64 = Buffer.from(audio).toString('base64');
 
-    // Handle JSON errors returned by ElevenLabs
-    if (contentType?.includes("application/json")) {
-      const errorData = Buffer.from(ttsResponse.data).toString("utf-8");
-      console.error("ElevenLabs API error:", errorData);
-      return res.status(500).json({ error: "TTS failed", details: errorData });
-    }
-
-    // Convert audio buffer to Base64 for frontend playback
-    const audioBase64 = Buffer.from(ttsResponse.data).toString("base64");
-
-    return res.json({
-      success: true,
-      audio: audioBase64,
-      format: "audio/mpeg",
-      text
-    });
+    res.json({ success: true, audio: audioBase64, format: 'audio/mpeg', text });
 
   } catch (err) {
-    console.error("TTS ERROR FULL:", err.response?.data || err.message);
-
-    const details = err.response?.data
-      ? Buffer.isBuffer(err.response.data)
-        ? Buffer.from(err.response.data).toString("utf-8")
-        : err.response.data
-      : err.message;
-
-    return res.status(500).json({ error: "TTS request failed", details });
+    console.error("TTS SDK ERROR:", err);
+    res.status(500).json({ error: "TTS failed", details: err.message || err });
   }
 });
 
