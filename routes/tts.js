@@ -7,12 +7,12 @@ router.post('/', async (req, res) => {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: "Text is required" });
 
-    const VOICE_ID = "EXAVITQu4vr4xnSDxMaL"; // female sweet voice
-    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY?.trim();
+    const VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
+    const API_KEY = (process.env.ELEVENLABS_API_KEY || "").trim();
 
-    if (!ELEVENLABS_API_KEY) {
-      console.error("ELEVENLABS_API_KEY is missing!");
-      return res.status(500).json({ error: "Server TTS key not configured" });
+    if (!API_KEY) {
+      console.error("❌ ELEVENLABS_API_KEY is MISSING");
+      return res.status(500).json({ error: "Missing ElevenLabs API key" });
     }
 
     const response = await axios.post(
@@ -20,25 +20,30 @@ router.post('/', async (req, res) => {
       {
         text,
         voice_settings: {
-          stability: 0.8,
-          similarity_boost: 0.8
+          stability: 0.70,
+          similarity_boost: 0.85
         }
       },
       {
         headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
+          "xi-api-key": API_KEY,
           "Content-Type": "application/json",
-          Accept: "audio/mpeg"
+          "Accept": "audio/mpeg"
         },
         responseType: "arraybuffer"
       }
     );
 
-    res.set('Content-Type', 'audio/mpeg');
+    res.set("Content-Type", "audio/mpeg");
     res.send(response.data);
+
   } catch (err) {
-    console.error("TTS error details:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to generate voice" });
+    console.error("TTS ERROR FULL:", err.response?.data?.toString() || err.message);
+
+    return res.status(500).json({
+      error: "TTS failed",
+      details: err.response?.data?.toString() || err.message
+    });
   }
 });
 
