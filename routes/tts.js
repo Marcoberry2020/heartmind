@@ -1,33 +1,54 @@
- const express = require('express');
-const { ElevenLabsClient } = require('@elevenlabs/elevenlabs-js');
+ const express = require("express");
+const axios = require("axios");
 const router = express.Router();
 
-const elevenlabs = new ElevenLabsClient({
-  apiKey: process.env.ELEVENLABS_API_KEY,
-});
+const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // your ElevenLabs voice
+const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY?.trim();
 
-router.post('/', async (req, res) => {
+if (!ELEVEN_KEY) {
+  console.error("⚠️ Missing ElevenLabs API key in environment variables!");
+}
+
+// Optional: simple in-memory cache
+const cache = new Map();
+
+// POST /api/tts
+router.post("/", async (req, res) => {
   try {
     const { text } = req.body;
     if (!text || !text.trim()) return res.status(400).json({ error: "Text is required" });
 
-    const audio = await elevenlabs.textToSpeech.convert(
-      'JBFqnCBsd6RMkjVDRZzb', // Free human voice ID
+    // Check cache first
+    if (cache.has(text)) {
+      return res.json({ audio: cache.get(text) });
+    }
+
+    const ttsRes = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
       {
         text,
-        modelId: 'eleven_multilingual_v2',
-        outputFormat: 'mp3_44100_128',
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.7, similarity_boost: 0.85 }
+      },
+      {
+        headers: {
+          "xi-api-key": ELEVEN_KEY,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg"
+        },
+        responseType: "arraybuffer"
       }
     );
 
-    // Convert ArrayBuffer to Base64
-    const audioBase64 = Buffer.from(audio).toString('base64');
+    const audioBase64 = Buffer.from(ttsRes.data).toString("base64");
 
-    res.json({ success: true, audio: audioBase64, format: 'audio/mpeg', text });
+    // Save to cache
+    cache.set(text, audioBase64);
 
+    res.json({ audio: audioBase64 });
   } catch (err) {
-    console.error("TTS SDK ERROR:", err);
-    res.status(500).json({ error: "TTS failed", details: err.message || err });
+    console.error("TTS ERROR:", err.response?.data || err.message);
+    res.status(500).json({ error: "TTS failed", details: err.response?.data || err.message });
   }
 });
 
