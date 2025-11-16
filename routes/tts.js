@@ -16,7 +16,9 @@ const cache = new Map();
 router.post("/", async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text || !text.trim()) return res.status(400).json({ error: "Text is required" });
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Text is required" });
+    }
 
     // Check cache first
     if (cache.has(text)) {
@@ -40,15 +42,32 @@ router.post("/", async (req, res) => {
       }
     );
 
-    const audioBase64 = Buffer.from(ttsRes.data).toString("base64");
-
-    // Save to cache
-    cache.set(text, audioBase64);
-
-    res.json({ audio: audioBase64 });
+    // Check if response is actually audio
+    if (ttsRes.headers["content-type"]?.includes("audio")) {
+      const audioBase64 = Buffer.from(ttsRes.data).toString("base64");
+      cache.set(text, audioBase64);
+      return res.json({ audio: audioBase64 });
+    } else {
+      // If ElevenLabs returned JSON error instead of audio
+      let errorData = {};
+      try {
+        errorData = JSON.parse(Buffer.from(ttsRes.data).toString("utf8"));
+      } catch (parseErr) {
+        errorData = { message: "Unknown TTS error", raw: ttsRes.data.toString() };
+      }
+      console.error("TTS API returned error:", errorData);
+      return res.status(500).json({ error: "TTS failed", details: errorData });
+    }
   } catch (err) {
-    console.error("TTS ERROR:", err.response?.data || err.message);
-    res.status(500).json({ error: "TTS failed", details: err.response?.data || err.message });
+    // Handle axios error
+    let details = err.response?.data;
+    if (details && Buffer.isBuffer(details)) {
+      try {
+        details = JSON.parse(details.toString("utf8"));
+      } catch {}
+    }
+    console.error("TTS ERROR:", details || err.message);
+    res.status(500).json({ error: "TTS failed", details: details || err.message });
   }
 });
 
