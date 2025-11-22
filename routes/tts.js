@@ -2,7 +2,8 @@
 const { ElevenLabsClient } = require("@elevenlabs/elevenlabs-js");
 const router = express.Router();
 
-const ELEVEN_API_KEY = process.env.ELEVEN_KEY;
+
+const ELEVEN_API_KEY = process.env.ELEVEN_API_KEY;
 
 if (!ELEVEN_API_KEY) {
   console.error("❌ ELEVEN_KEY missing from .env");
