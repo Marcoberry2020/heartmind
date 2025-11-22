@@ -24,7 +24,7 @@ router.post("/create-session", async (req, res) => {
       : `user${userId.slice(-6)}@example.com`;
 
     // Amount (₦750)
-    const amount = 750 * 100;
+    const amount = 1000 * 100;
 
     console.log("✅ Creating Paystack session for:", email);
 
@@ -110,9 +110,9 @@ router.post("/verify-payment", async (req, res) => {
         ? new Date(user.subscriptionExpiresAt)
         : now;
 
-    // Add 30 days subscription
+    // Add 7 days subscription
     const newExpiry = new Date(
-      currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000
+      currentExpiry.getTime() + 7 * 24 * 60 * 60 * 1000
     );
 
     user.subscriptionExpiresAt = newExpiry;

@@ -1,73 +1,59 @@
  const express = require("express");
-const axios = require("axios");
+const { ElevenLabsClient } = require("@elevenlabs/elevenlabs-js");
 const router = express.Router();
 
-const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // your ElevenLabs voice
-const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY?.trim();
+const ELEVEN_API_KEY = process.env.ELEVEN_KEY;
 
-if (!ELEVEN_KEY) {
-  console.error("⚠️ Missing ElevenLabs API key in environment variables!");
+if (!ELEVEN_API_KEY) {
+  console.error("❌ ELEVEN_KEY missing from .env");
 }
 
-// Optional: simple in-memory cache
 const cache = new Map();
 
-// POST /api/tts
+// Helper: Convert ReadableStream → Base64 without waiting for full audio
+async function streamToBase64(stream) {
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("base64");
+}
+
 router.post("/", async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text || !text.trim()) {
-      return res.status(400).json({ error: "Text is required" });
+
+    if (!text) {
+      return res.status(400).json({ error: "Text required" });
     }
 
-    // Check cache first
     if (cache.has(text)) {
       return res.json({ audio: cache.get(text) });
     }
 
-    const ttsRes = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+    const elevenlabs = new ElevenLabsClient({ apiKey: ELEVEN_API_KEY });
+
+    // Convert text to speech with streaming
+    const audioStream = await elevenlabs.textToSpeech.convert(
+      "21m00Tcm4TlvDq8ikWAM", // voice ID
       {
         text,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.7, similarity_boost: 0.85 }
-      },
-      {
-        headers: {
-          "xi-api-key": ELEVEN_KEY,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg"
-        },
-        responseType: "arraybuffer"
+        modelId: "eleven_multilingual_v2",
+        outputFormat: "mp3_44100_128",
       }
     );
 
-    // Check if response is actually audio
-    if (ttsRes.headers["content-type"]?.includes("audio")) {
-      const audioBase64 = Buffer.from(ttsRes.data).toString("base64");
-      cache.set(text, audioBase64);
-      return res.json({ audio: audioBase64 });
-    } else {
-      // If ElevenLabs returned JSON error instead of audio
-      let errorData = {};
-      try {
-        errorData = JSON.parse(Buffer.from(ttsRes.data).toString("utf8"));
-      } catch (parseErr) {
-        errorData = { message: "Unknown TTS error", raw: ttsRes.data.toString() };
-      }
-      console.error("TTS API returned error:", errorData);
-      return res.status(500).json({ error: "TTS failed", details: errorData });
-    }
+    // Convert chunks to Base64 as soon as they arrive
+    const audioBase64 = await streamToBase64(audioStream);
+
+    // Cache the result
+    cache.set(text, audioBase64);
+
+    // Respond immediately
+    res.json({ audio: audioBase64 });
   } catch (err) {
-    // Handle axios error
-    let details = err.response?.data;
-    if (details && Buffer.isBuffer(details)) {
-      try {
-        details = JSON.parse(details.toString("utf8"));
-      } catch {}
-    }
-    console.error("TTS ERROR:", details || err.message);
-    res.status(500).json({ error: "TTS failed", details: details || err.message });
+    console.error("ELEVENLABS TTS ERROR:", err);
+    res.status(500).json({ error: "TTS failed", details: err.message });
   }
 });
 
