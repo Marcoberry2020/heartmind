@@ -4,29 +4,31 @@ const userSchema = new mongoose.Schema({
   name: String,
   email: { type: String, unique: true },
   passwordHash: String,
+
+  // 🔐 Forgot password
+  resetPasswordToken: String,
+  resetPasswordExpires: Date,
+
   createdAt: { type: Date, default: Date.now },
 
-  // ✅ Free messages before needing subscription
-  freeMessages: { type: Number, default: 10 },
+  freeMessages: { type: Number, default: 5 },
+  freeStreams: { type: Number, default: 5 },
 
-  // ✅ Subscription expiration for paid users
   subscriptionExpiresAt: { type: Date, default: null },
 
-  // ✅ SHORT-TERM MEMORY (conversation history)
   chatHistory: [
     {
-      role: { type: String },      // "user" | "assistant"
-      text: { type: String },      // the message content
+      role: String,
+      text: String,
       timestamp: { type: Date, default: Date.now }
     }
   ],
 
-  // ✅ LONG-TERM EMOTIONAL MEMORY (personality profile)
   emotionalProfile: {
-    moods: { type: [String], default: [] },        // e.g. ["sad", "anxious"]
-    triggers: { type: [String], default: [] },     // e.g. ["loneliness"]
-    goals: { type: [String], default: [] },        // e.g. ["healing", "confidence"]
-    preferences: { type: [String], default: [] }   // e.g. ["gentle tone", "short advice"]
+    moods: { type: [String], default: [] },
+    triggers: { type: [String], default: [] },
+    goals: { type: [String], default: [] },
+    preferences: { type: [String], default: [] }
   }
 });
 

@@ -9,6 +9,7 @@ const aiRoutes = require('./routes/ai');
 const dataRoutes = require('./routes/data');
 const paymentRoutes = require('./routes/payment');
 const ttsRoutes = require('./routes/tts');
+const aiChatRoutes = require('./routes/ai-chat');
 
 const app = express();
 
@@ -19,10 +20,11 @@ app.use(express.urlencoded({ extended: true }));
 
 // ✅ API routes (must come before React static)
 app.use('/api/auth', authRoutes);
-app.use('/api/ai-chat', aiRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/tts', ttsRoutes);
+app.use('/api/ai-chat', aiChatRoutes);
 
 // Optional Paystack webhook (raw body)
 app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), (req, res) => {
@@ -30,16 +32,22 @@ app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), (req
   res.sendStatus(200);
 });
 
-// Root route
+// Root API route
 app.get('/', (req, res) => res.send('HeartMind backend is running!'));
 
-//  Serve React build (after API routes)
-app.use(express.static(path.join(__dirname, 'client/build')));
-app.get(/.*/, (req, res) =>
-  res.sendFile(path.join(__dirname, 'client/build', 'index.html'))
-);
+// ------------------- React Production Build -------------------
+if (process.env.NODE_ENV === 'production') {
+  const buildPath = path.join(__dirname, 'client', 'build');
 
-// ✅ Start server
+  app.use(express.static(buildPath));
+  app.get(/.*/, (req, res) => {
+    res.sendFile(path.join(buildPath, 'index.html'));
+  });
+} else {
+  console.log('Running in development mode. React dev server should handle the frontend.');
+}
+
+// ------------------- Start Server -------------------
 const PORT = process.env.PORT || 4000;
 
 mongoose

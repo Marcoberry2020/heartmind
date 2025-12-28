@@ -1,60 +1,81 @@
- const express = require("express");
-const { ElevenLabsClient } = require("@elevenlabs/elevenlabs-js");
+ require("dotenv").config();
+const express = require("express");
 const router = express.Router();
+const axios = require("axios");
+const { ElevenLabsClient } = require("@elevenlabs/elevenlabs-js");
 
+const eleven = new ElevenLabsClient({
+  apiKey: process.env.ELEVEN_LABS_API_KEY,
+});
 
-const ELEVEN_API_KEY = process.env.ELEVEN_API_KEY;
-
-if (!ELEVEN_API_KEY) {
-  console.error("❌ ELEVEN_KEY missing from .env");
+// Helper to send SSE events
+function sendSSE(res, event, data) {
+  if (event) res.write(`event: ${event}\n`);
+  res.write(`data: ${data}\n\n`);
 }
 
-const cache = new Map();
+router.get("/stream", async (req, res) => {
+  const { text, voiceId } = req.query;
 
-// Helper: Convert ReadableStream → Base64 without waiting for full audio
-async function streamToBase64(stream) {
-  const chunks = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.from(chunk));
+  if (!text || !voiceId) {
+    return res.status(400).send("Missing text or voiceId");
   }
-  return Buffer.concat(chunks).toString("base64");
-}
 
-router.post("/", async (req, res) => {
+  // Setup SSE
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  res.flushHeaders();
+
   try {
-    const { text } = req.body;
-
-    if (!text) {
-      return res.status(400).json({ error: "Text required" });
-    }
-
-    if (cache.has(text)) {
-      return res.json({ audio: cache.get(text) });
-    }
-
-    const elevenlabs = new ElevenLabsClient({ apiKey: ELEVEN_API_KEY });
-
-    // Convert text to speech with streaming
-    const audioStream = await elevenlabs.textToSpeech.convert(
-      "21m00Tcm4TlvDq8ikWAM", // voice ID
+    // 1️⃣ AI text generation (Groq)
+    const aiReq = await axios.post(
+      "https://api.groq.com/openai/v1/chat/completions",
       {
-        text,
-        modelId: "eleven_multilingual_v2",
-        outputFormat: "mp3_44100_128",
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: "You are HeartMind, an empathetic companion." },
+          { role: "user", content: text },
+        ],
+        temperature: 0.7,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
       }
     );
 
-    // Convert chunks to Base64 as soon as they arrive
-    const audioBase64 = await streamToBase64(audioStream);
+    const aiText = aiReq.data.choices[0].message.content;
 
-    // Cache the result
-    cache.set(text, audioBase64);
+    // 2️⃣ Stream tokenized text (simulated chunking)
+    for (const chunk of aiText.match(/.{1,50}/g)) {
+      sendSSE(res, "text", chunk);
+    }
 
-    // Respond immediately
-    res.json({ audio: audioBase64 });
+    // 3️⃣ ElevenLabs streaming (CHUNKED base64)
+    const audioStream = await eleven.textToSpeech.convertAsStream(voiceId, {
+      text: aiText,
+      model_id: "eleven_multilingual_v2",
+      optimize_streaming_latency: 4,
+      stream: true,
+    });
+
+    for await (const chunk of audioStream) {
+      const b64 = Buffer.from(chunk).toString("base64");
+      sendSSE(res, "audio", b64);
+    }
+
+    // 4️⃣ Done
+    sendSSE(res, "done", "[DONE]");
+    res.end();
   } catch (err) {
-    console.error("ELEVENLABS TTS ERROR:", err);
-    res.status(500).json({ error: "TTS failed", details: err.message });
+    console.error("STREAM ERROR:", err);
+    sendSSE(res, "error", "Streaming failed");
+    res.end();
   }
 });
 

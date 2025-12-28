@@ -1,24 +1,29 @@
-const axios = require('axios');
+ const express = require("express");
+const { ElevenLabsClient } = require("@elevenlabs/elevenlabs-js");
+const auth = require("../middleware/auth");
+const router = express.Router();
 
-async function testTTS() {
+const ELEVEN_API_KEY = process.env.ELEVEN_API_KEY;
+
+router.post("/tts-stream", auth, async (req, res) => {
   try {
-    const payload = {
-      text: "Hello, this is a test from HeartMind AI",
-      voice: "alloy" // replace with your voice ID if needed
-    };
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "Text required" });
 
-    const response = await axios.post(
-      'https://heartmind-vghw.onrender.com/api/tts', // your backend endpoint
-      payload,
-      {
-        headers: { "Content-Type": "application/json" }
-      }
+    const elevenlabs = new ElevenLabsClient({ apiKey: ELEVEN_API_KEY });
+
+    const audioStream = await elevenlabs.textToSpeech.convert(
+      "21m00Tcm4TlvDq8ikWAM",
+      { text, modelId: "eleven_multilingual_v2", outputFormat: "mp3_44100_128" }
     );
 
-    console.log('TTS response:', response.data);
+    // Stream directly to frontend
+    res.setHeader("Content-Type", "audio/mpeg");
+    audioStream.pipe(res);
   } catch (err) {
-    console.error('TTS test failed:', err.response?.data || err.message);
+    console.error("Streaming TTS failed:", err);
+    res.status(500).json({ error: err.message });
   }
-}
+});
 
-testTTS();
+module.exports = router;
