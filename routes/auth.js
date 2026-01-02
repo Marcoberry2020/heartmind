@@ -43,7 +43,6 @@ router.post('/signup', async (req, res) => {
     });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-
     res.json({
       token,
       user: {
@@ -73,7 +72,6 @@ router.post('/login', async (req, res) => {
     if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-
     res.json({
       token,
       user: {
@@ -101,33 +99,26 @@ router.post('/forgot-password', async (req, res) => {
 
     const token = crypto.randomBytes(32).toString('hex');
     user.resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
-    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
+    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 mins
     await user.save();
 
-    // ✅ SendGrid transporter (Render-safe)
     const transporter = nodemailer.createTransport({
-      host: "smtp.sendgrid.net",
-      port: 587,
-      secure: false,
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === 'true',
       auth: {
-        user: "apikey",
-        pass: process.env.SENDGRID_API_KEY,
-      },
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
     });
 
     const resetURL = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-
     await transporter.sendMail({
-      from: `"AI App" <no-reply@heartmind.ai>`,
+      from: `"AI App" <${process.env.SMTP_USER}>`,
       to: user.email,
       subject: 'Password Reset',
-      html: `
-        <p>You requested a password reset.</p>
-        <p>
-          Click this <a href="${resetURL}">link</a> to reset your password.
-          <br/>This link expires in 15 minutes.
-        </p>
-      `,
+      html: `<p>You requested a password reset.</p>
+             <p>Click this <a href="${resetURL}">link</a> to reset your password. Expires in 15 minutes.</p>`
     });
 
     res.json({ message: 'Password reset link sent if email exists.' });
@@ -141,7 +132,6 @@ router.post('/forgot-password', async (req, res) => {
 router.post('/reset-password/:token', async (req, res) => {
   try {
     const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
-
     const user = await User.findOne({
       resetPasswordToken: hashedToken,
       resetPasswordExpires: { $gt: Date.now() }
@@ -220,10 +210,11 @@ router.post('/decrement-free-stream', auth, async (req, res) => {
   }
 });
 
-// ---------- CHAT MEMORY ----------
+// ---------- CHAT MEMORY: GET ----------
 router.get('/memory/:userId', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId);
+    const { userId } = req.params;
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user.chatHistory || []);
   } catch (err) {
@@ -232,9 +223,12 @@ router.get('/memory/:userId', auth, async (req, res) => {
   }
 });
 
+// ---------- CHAT MEMORY: SAVE ----------
 router.post('/memory/save', auth, async (req, res) => {
   try {
     const { userId, messages } = req.body;
+    if (!userId || !messages) return res.status(400).json({ message: 'Missing userId or messages' });
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -252,9 +246,12 @@ router.post('/memory/save', auth, async (req, res) => {
   }
 });
 
+// ---------- CHAT MEMORY: PRUNE OLD ----------
 router.post('/memory/prune', auth, async (req, res) => {
   try {
     const { userId, days = 7 } = req.body;
+    if (!userId) return res.status(400).json({ message: 'Missing userId' });
+
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     await User.updateOne(
@@ -262,7 +259,7 @@ router.post('/memory/prune', auth, async (req, res) => {
       { $pull: { chatHistory: { timestamp: { $lt: cutoff } } } }
     );
 
-    res.json({ success: true });
+    res.json({ success: true, message: `Messages older than ${days} days deleted.` });
   } catch (err) {
     console.error('Prune memory error:', err);
     res.status(500).json({ message: 'Could not prune memory' });
