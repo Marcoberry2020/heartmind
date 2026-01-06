@@ -120,9 +120,9 @@ router.post("/verify-payment", async (req, res) => {
         ? new Date(user.subscriptionExpiresAt)
         : now;
 
-    // Extend by 3 days
+    // Extend by 7 days
     const newExpiry = new Date(
-      baseDate.getTime() + 3 * 24 * 60 * 60 * 1000
+      baseDate.getTime() + 7 * 24 * 60 * 60 * 1000
     );
 
     user.subscriptionExpiresAt = newExpiry;

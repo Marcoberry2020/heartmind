@@ -5,11 +5,10 @@ const cors = require('cors');
 const path = require('path');
 
 const authRoutes = require('./routes/auth');
-const aiRoutes = require('./routes/ai');
 const dataRoutes = require('./routes/data');
 const paymentRoutes = require('./routes/payment');
-const ttsRoutes = require('./routes/tts');
 const aiChatRoutes = require('./routes/ai-chat');
+
 
 const app = express();
 
@@ -20,10 +19,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // ✅ API routes (must come before React static)
 app.use('/api/auth', authRoutes);
-app.use('/api/ai', aiRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/payment', paymentRoutes);
-app.use('/api/tts', ttsRoutes);
 app.use('/api/ai-chat', aiChatRoutes);
 
 // Optional Paystack webhook (raw body)
