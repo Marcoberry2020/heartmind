@@ -11,8 +11,8 @@ const userSchema = new mongoose.Schema({
 
   createdAt: { type: Date, default: Date.now },
 
-  freeMessages: { type: Number, default: 5 },
-  freeStreams: { type: Number, default: 5 },
+  freeMessages: { type: Number, default: 2 },
+  freeStreams: { type: Number, default: 2 },
 
   subscriptionExpiresAt: { type: Date, default: null },
 

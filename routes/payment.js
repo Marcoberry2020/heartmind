@@ -113,17 +113,18 @@ router.post("/verify-payment", async (req, res) => {
       });
     }
 
-    // Subscription date handling
-    const now = new Date();
-    const baseDate =
-      user.subscriptionExpiresAt && user.subscriptionExpiresAt > now
-        ? new Date(user.subscriptionExpiresAt)
-        : now;
+    
+    // Subscription date handling (FIXED)
+const now = new Date();
 
-    // Extend by 7 days
-    const newExpiry = new Date(
-      baseDate.getTime() + 7 * 24 * 60 * 60 * 1000
-    );
+// ALWAYS give exactly 3 days from payment time
+const newExpiry = new Date(
+  now.getTime() + 3 * 24 * 60 * 60 * 1000
+);
+
+user.subscriptionExpiresAt = newExpiry;
+await user.save();
+
 
     user.subscriptionExpiresAt = newExpiry;
     await user.save();
