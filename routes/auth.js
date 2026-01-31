@@ -36,8 +36,8 @@ router.post('/signup', async (req, res) => {
       name,
       email,
       passwordHash,
-      freeMessages: 2,
-      freeStreams: 2,
+      freeMessages: 5,
+      freeStreams: 5,
       subscriptionExpiresAt: null,
       chatHistory: [],
     });
